@@ -3,6 +3,7 @@ package graphqlupload
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io/ioutil"
 	"log"
 	"mime"
@@ -152,6 +153,45 @@ func addFileToOperations(operations map[string]interface{}, p postedFileCollecti
 		MIMEType: mimeType,
 		Filename: handle.Filename,
 		Filepath: name,
+	}
+	return operations
+}
+
+func addFile(operations interface{}, p postedFileCollection, idx string, entryPaths []string) interface{} {
+	file, handle, err := p(idx)
+	if err != nil {
+		log.Printf("could not access multipart file. reason: %v", err)
+		return operations
+	}
+	defer file.Close()
+
+	data, err := ioutil.ReadAll(file)
+	if err != nil {
+		log.Printf("could not read multipart file. reason: %v", err)
+		return operations
+	}
+	name := strings.Join([]string{os.TempDir(), handle.Filename}, "/")
+	err = ioutil.WriteFile(name, data, 0666)
+	if err != nil {
+		log.Printf("could not write file. reason: %v", err)
+		return operations
+	}
+	mimeType := handle.Header.Get("Content-Type")
+
+	if op, ok := operations.([]map[string]interface{}); ok {
+		fidx, _ := strconv.Atoi(entryPaths[len(entryPaths)-1])
+		// op[fidx] = &GraphQLUpload{
+		// 	MIMEType: mimeType,
+		// 	Filename: handle.Filename,
+		// 	Filepath: name,
+		// }
+		fmt.Printf("%#v %#v", op, fidx)
+	} else if op, ok := operations.(map[string]interface{}); ok {
+		op[entryPaths[len(entryPaths)-1]] = &GraphQLUpload{
+			MIMEType: mimeType,
+			Filename: handle.Filename,
+			Filepath: name,
+		}
 	}
 	return operations
 }
