@@ -3,7 +3,6 @@ package graphqlupload
 import (
 	"bytes"
 	"encoding/json"
-	"fmt"
 	"io/ioutil"
 	"log"
 	"mime"
@@ -84,7 +83,8 @@ func Handler(next http.Handler) http.Handler {
 						err := json.Unmarshal([]byte(o), &batchOperations)
 						if err == nil {
 							if err := json.Unmarshal([]byte(m), &mapEntries); err == nil {
-								_ = multipleTransformation(mapEntries, batchOperations, r.FormFile)
+								_ = batchTransformation(mapEntries, batchOperations, r.FormFile)
+
 							}
 						}
 					}
@@ -106,14 +106,15 @@ func singleTransformation(mapEntries map[string][]string, operations map[string]
 	}
 	return operations
 }
-func multipleTransformation(mapEntries map[string][]string, batchOperations []map[string]interface{}, p postedFileCollection) []map[string]interface{} {
+func batchTransformation(mapEntries map[string][]string, batchOperations []map[string]interface{}, p postedFileCollection) []map[string]interface{} {
 	for idx, mapEntry := range mapEntries {
 		for _, entry := range mapEntry {
 			entryPaths := strings.Split(entry, ".")
 			operationIndex, _ := strconv.Atoi(entryPaths[0])
 			operations := batchOperations[operationIndex]
 			fields := findField(operations, entryPaths[:len(entryPaths)-1])
-			batchOperations[operationIndex] = addFileToOperations(fields, p, idx, entryPaths)
+			_ = addFileToOperations(fields, p, idx, entryPaths)
+
 		}
 	}
 	return batchOperations
@@ -129,35 +130,8 @@ func findField(operations interface{}, entryPaths []string) map[string]interface
 	}
 	return operations.(map[string]interface{})
 }
-func addFileToOperations(operations map[string]interface{}, p postedFileCollection, idx string, entryPaths []string) map[string]interface{} {
-	file, handle, err := p(idx)
-	if err != nil {
-		log.Printf("could not access multipart file. reason: %v", err)
-		return operations
-	}
-	defer file.Close()
 
-	data, err := ioutil.ReadAll(file)
-	if err != nil {
-		log.Printf("could not read multipart file. reason: %v", err)
-		return operations
-	}
-	name := strings.Join([]string{os.TempDir(), handle.Filename}, "/")
-	err = ioutil.WriteFile(name, data, 0666)
-	if err != nil {
-		log.Printf("could not write file. reason: %v", err)
-		return operations
-	}
-	mimeType := handle.Header.Get("Content-Type")
-	operations[entryPaths[len(entryPaths)-1]] = &GraphQLUpload{
-		MIMEType: mimeType,
-		Filename: handle.Filename,
-		Filepath: name,
-	}
-	return operations
-}
-
-func addFile(operations interface{}, p postedFileCollection, idx string, entryPaths []string) interface{} {
+func addFileToOperations(operations interface{}, p postedFileCollection, idx string, entryPaths []string) interface{} {
 	file, handle, err := p(idx)
 	if err != nil {
 		log.Printf("could not access multipart file. reason: %v", err)
@@ -180,18 +154,19 @@ func addFile(operations interface{}, p postedFileCollection, idx string, entryPa
 
 	if op, ok := operations.([]map[string]interface{}); ok {
 		fidx, _ := strconv.Atoi(entryPaths[len(entryPaths)-1])
-		// op[fidx] = &GraphQLUpload{
-		// 	MIMEType: mimeType,
-		// 	Filename: handle.Filename,
-		// 	Filepath: name,
-		// }
-		fmt.Printf("%#v %#v", op, fidx)
+		op[fidx][entryPaths[len(entryPaths)-1]] = &GraphQLUpload{
+			MIMEType: mimeType,
+			Filename: handle.Filename,
+			Filepath: name,
+		}
+		return op
 	} else if op, ok := operations.(map[string]interface{}); ok {
 		op[entryPaths[len(entryPaths)-1]] = &GraphQLUpload{
 			MIMEType: mimeType,
 			Filename: handle.Filename,
 			Filepath: name,
 		}
+		return op
 	}
-	return operations
+	return nil
 }

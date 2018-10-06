@@ -131,6 +131,6 @@ func (r *schemaResolver) CreateContact(ctx context.Context, args struct {
 	ioutil.WriteFile(args.Input.Photo.Filename, b2[:], 0666)
 
 	// method 2: using WriteFile function. Easily write to any location in the local file system
-	args.Input.Photo.WriteFile("/home/smith/Desktop/" + args.Input.Photo.Filename)
-	return &contactResolver{person{FirstName: "Smith", LastName: "Samuel"}}, nil
+	args.Input.Photo.WriteFile(args.Input.Photo.Filename)
+	return &contactResolver{person{FirstName: "Smithies", LastName: "Frank"}}, nil
 }
