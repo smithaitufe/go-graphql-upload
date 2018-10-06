@@ -1,6 +1,6 @@
 # go-graphqlupload
 
-A file upload middleware for gophers. It enables file upload operations to be done in [Go] (https://github.com/google/) using [apollo-upload-client] (https://github.com/jaydenseric/apollo-upload-client) and [graph-gophers/graphql-go] (https://github.com/graph-gophers/graphql-go) packages.
+A file upload middleware for gophers. It enables file upload operations to be done in [Go](https://github.com/google/) using [apollo-upload-client](https://github.com/jaydenseric/apollo-upload-client) and [graph-gophers/graphql-go](https://github.com/graph-gophers/graphql-go) packages.
 
 
 ## Usage
