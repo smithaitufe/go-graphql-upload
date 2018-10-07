@@ -3,14 +3,16 @@ package graphqlupload
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io/ioutil"
-	"log"
 	"mime"
 	"mime/multipart"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 )
 
 type postedFileCollection func(key string) (multipart.File, *multipart.FileHeader, error)
@@ -21,6 +23,13 @@ type params struct {
 	Operations    map[string]interface{} `json:"operations"`
 	Map           map[string][]string    `json:"map"`
 }
+type fileOperation struct {
+	Fields         interface{}
+	FileCollection postedFileCollection
+	MapEntryIndex  string
+	SplittedPath   []string
+}
+
 type graphqlUploadError struct {
 	errorString string
 }
@@ -30,13 +39,16 @@ func (e graphqlUploadError) Error() string {
 }
 
 var (
-	MissingOperationsParam = &graphqlUploadError{"Missing operations parameter"}
-	MissingMapParam        = &graphqlUploadError{"Missing operations parameter"}
-	InvalidMapParam        = &graphqlUploadError{"Invalid map parameter"}
+	errMissingOperationsParam      = &graphqlUploadError{"Missing operations parameter"}
+	errMissingMapParam             = &graphqlUploadError{"Missing operations parameter"}
+	errInvalidMapParam             = &graphqlUploadError{"Invalid map parameter"}
+	errIncompleteRequestProcessing = &graphqlUploadError{"Could not process request"}
+	addFileChannel                 = make(chan fileOperation)
 )
 
 var mapEntries map[string][]string
 var singleOperations map[string]interface{}
+var wg sync.WaitGroup
 
 func Handler(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -48,19 +60,24 @@ func Handler(next http.Handler) http.Handler {
 					r.ParseMultipartForm((1 << 20) * 64)
 					m := r.PostFormValue("map")
 					o := r.PostFormValue("operations")
+
 					if &o == nil {
-						http.Error(w, MissingOperationsParam.Error(), http.StatusBadRequest)
+						http.Error(w, errMissingOperationsParam.Error(), http.StatusBadRequest)
 						return
 					}
 					if &m == nil {
-						http.Error(w, MissingMapParam.Error(), http.StatusBadRequest)
+						http.Error(w, errMissingMapParam.Error(), http.StatusBadRequest)
 						return
 					}
 					err := json.Unmarshal([]byte(o), &singleOperations)
 					if err == nil {
 						err = json.Unmarshal([]byte(m), &mapEntries)
 						if err == nil {
-							mo := singleTransformation(mapEntries, singleOperations, r.FormFile)
+							mo, err := singleTransformation(mapEntries, singleOperations, r.FormFile)
+							if err != nil {
+								http.Error(w, errIncompleteRequestProcessing.Error(), http.StatusBadRequest)
+								return
+							}
 							p := params{
 								OperationName: r.PostFormValue("operationName"),
 								Variables:     mo["variables"],
@@ -74,7 +91,7 @@ func Handler(next http.Handler) http.Handler {
 								w.Header().Set("Content-Type", "application/json")
 							}
 						} else {
-							http.Error(w, InvalidMapParam.Error(), http.StatusBadRequest)
+							http.Error(w, errInvalidMapParam.Error(), http.StatusBadRequest)
 							return
 						}
 
@@ -84,7 +101,18 @@ func Handler(next http.Handler) http.Handler {
 						if err == nil {
 							if err := json.Unmarshal([]byte(m), &mapEntries); err == nil {
 								_ = batchTransformation(mapEntries, batchOperations, r.FormFile)
-
+								// p := params{
+								// 	OperationName: r.PostFormValue("operationName"),
+								// 	Variables:     mo["variables"],
+								// 	Query:         mo["query"],
+								// 	Operations:    singleOperations,
+								// 	Map:           mapEntries,
+								// }
+								// body, err := json.Marshal(p)
+								// if err == nil {
+								// 	r.Body = ioutil.NopCloser(bytes.NewReader(body))
+								// 	w.Header().Set("Content-Type", "application/json")
+								// }
 							}
 						}
 					}
@@ -96,24 +124,45 @@ func Handler(next http.Handler) http.Handler {
 	})
 }
 
-func singleTransformation(mapEntries map[string][]string, operations map[string]interface{}, p postedFileCollection) map[string]interface{} {
+func singleTransformation(mapEntries map[string][]string, operations map[string]interface{}, p postedFileCollection) (map[string]interface{}, error) {
+
 	for idx, mapEntry := range mapEntries {
 		for _, entry := range mapEntry {
-			entryPaths := strings.Split(entry, ".")
-			fields := findField(operations, entryPaths[:len(entryPaths)-1])
-			addFileToOperations(fields, p, idx, entryPaths)
+			wg.Add(1)
+			go func(entry, idx string, operations map[string]interface{}) {
+				defer wg.Done()
+
+				wg.Add(1)
+				go func() {
+					defer wg.Done()
+					_, _ = addFile()
+				}()
+
+				entryPaths := strings.Split(entry, ".")
+				fields := findField(operations, entryPaths[:len(entryPaths)-1])
+
+				addFileChannel <- fileOperation{
+					Fields:         fields,
+					FileCollection: p,
+					MapEntryIndex:  idx,
+					SplittedPath:   entryPaths,
+				}
+			}(entry, idx, operations)
+
 		}
 	}
-	return operations
+	wg.Wait()
+
+	return operations, nil
 }
 func batchTransformation(mapEntries map[string][]string, batchOperations []map[string]interface{}, p postedFileCollection) []map[string]interface{} {
-	for idx, mapEntry := range mapEntries {
+	for _, mapEntry := range mapEntries {
 		for _, entry := range mapEntry {
 			entryPaths := strings.Split(entry, ".")
-			operationIndex, _ := strconv.Atoi(entryPaths[0])
-			operations := batchOperations[operationIndex]
-			fields := findField(operations, entryPaths[:len(entryPaths)-1])
-			_ = addFileToOperations(fields, p, idx, entryPaths)
+			opIdx, _ := strconv.Atoi(entryPaths[0])
+			operations := batchOperations[opIdx]
+			_ = findField(operations, entryPaths[:len(entryPaths)-1])
+			// _ = addFileToOperations(fields, p, idx, entryPaths)
 
 		}
 	}
@@ -131,42 +180,52 @@ func findField(operations interface{}, entryPaths []string) map[string]interface
 	return operations.(map[string]interface{})
 }
 
-func addFileToOperations(operations interface{}, p postedFileCollection, idx string, entryPaths []string) interface{} {
-	file, handle, err := p(idx)
+func addFile() (interface{}, error) {
+	params := <-addFileChannel
+	file, handle, err := params.FileCollection(params.MapEntryIndex)
 	if err != nil {
-		log.Printf("could not access multipart file. reason: %v", err)
-		return operations
+		return nil, fmt.Errorf("could not access multipart file. reason: %v", err)
 	}
 	defer file.Close()
 
 	data, err := ioutil.ReadAll(file)
 	if err != nil {
-		log.Printf("could not read multipart file. reason: %v", err)
-		return operations
+		return nil, fmt.Errorf("could not read multipart file. reason: %v", err)
 	}
-	name := strings.Join([]string{os.TempDir(), handle.Filename}, "/")
-	err = ioutil.WriteFile(name, data, 0666)
+
+	// name := strings.Join([]string{os.TempDir(), handle.Filename}, "/")
+
+	f, err := ioutil.TempFile(os.TempDir(), fmt.Sprintf("graphqlupload-*%s", filepath.Ext(handle.Filename)))
 	if err != nil {
-		log.Printf("could not write file. reason: %v", err)
-		return operations
+		return nil, fmt.Errorf("unable to create temp file. reason: %v", err)
 	}
+
+	_, err = f.Write(data)
+	if err != nil {
+		return nil, fmt.Errorf("could not write file. reason: %v", err)
+	}
+
+	// err = ioutil.WriteFile(name, data, 0666)
+	// if err != nil {
+	// 	return nil, fmt.Errorf("could not write file. reason: %v", err)
+	// }
 	mimeType := handle.Header.Get("Content-Type")
 
-	if op, ok := operations.([]map[string]interface{}); ok {
-		fidx, _ := strconv.Atoi(entryPaths[len(entryPaths)-1])
-		op[fidx][entryPaths[len(entryPaths)-1]] = &GraphQLUpload{
+	if op, ok := params.Fields.([]map[string]interface{}); ok {
+		fidx, _ := strconv.Atoi(params.SplittedPath[len(params.SplittedPath)-1])
+		op[fidx][params.SplittedPath[len(params.SplittedPath)-1]] = &GraphQLUpload{
 			MIMEType: mimeType,
 			Filename: handle.Filename,
-			Filepath: name,
+			Filepath: f.Name(),
 		}
-		return op
-	} else if op, ok := operations.(map[string]interface{}); ok {
-		op[entryPaths[len(entryPaths)-1]] = &GraphQLUpload{
+		return op, nil
+	} else if op, ok := params.Fields.(map[string]interface{}); ok {
+		op[params.SplittedPath[len(params.SplittedPath)-1]] = &GraphQLUpload{
 			MIMEType: mimeType,
 			Filename: handle.Filename,
-			Filepath: name,
+			Filepath: f.Name(),
 		}
-		return op
+		return op, nil
 	}
-	return nil
+	return nil, nil
 }
