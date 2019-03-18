@@ -9,9 +9,9 @@ import (
 )
 
 type GraphQLUpload struct {
-	Filename string `json:"filename"`
+	FileName string `json:"filename"`
 	MIMEType string `json:"mimetype"`
-	Filepath string `json:"filepath"`
+	FilePath string `json:"filepath"`
 }
 
 func (_ GraphQLUpload) ImplementsGraphQLType(name string) bool { return name == "Upload" }
@@ -30,7 +30,7 @@ func (u *GraphQLUpload) UnmarshalGraphQL(input interface{}) error {
 	}
 }
 func createReadStream(u *GraphQLUpload) (io.Reader, error) {
-	f, err := os.Open(u.Filepath)
+	f, err := os.Open(u.FilePath)
 	if err == nil {
 		return bufio.NewReader(f), nil
 	}

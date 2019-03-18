@@ -192,10 +192,7 @@ func addFile() (interface{}, error) {
 	if err != nil {
 		return nil, fmt.Errorf("could not read multipart file. reason: %v", err)
 	}
-
-	// name := strings.Join([]string{os.TempDir(), handle.Filename}, "/")
-
-	f, err := ioutil.TempFile(os.TempDir(), fmt.Sprintf("graphqlupload-*%s", filepath.Ext(handle.Filename)))
+	f, err := ioutil.TempFile(os.TempDir(), fmt.Sprintf("graphql-upload-%s%s", handle.Filename, filepath.Ext(handle.Filename)))
 	if err != nil {
 		return nil, fmt.Errorf("unable to create temp file. reason: %v", err)
 	}
@@ -204,26 +201,22 @@ func addFile() (interface{}, error) {
 	if err != nil {
 		return nil, fmt.Errorf("could not write file. reason: %v", err)
 	}
-
-	// err = ioutil.WriteFile(name, data, 0666)
-	// if err != nil {
-	// 	return nil, fmt.Errorf("could not write file. reason: %v", err)
-	// }
 	mimeType := handle.Header.Get("Content-Type")
-
 	if op, ok := params.Fields.([]map[string]interface{}); ok {
 		fidx, _ := strconv.Atoi(params.SplittedPath[len(params.SplittedPath)-1])
-		op[fidx][params.SplittedPath[len(params.SplittedPath)-1]] = &GraphQLUpload{
+		upload := &GraphQLUpload{
 			MIMEType: mimeType,
-			Filename: handle.Filename,
-			Filepath: f.Name(),
+			FileName: handle.Filename,
+			FilePath: f.Name(),
 		}
+		fmt.Printf("%#v", *upload)
+		op[fidx][params.SplittedPath[len(params.SplittedPath)-1]] = upload
 		return op, nil
 	} else if op, ok := params.Fields.(map[string]interface{}); ok {
 		op[params.SplittedPath[len(params.SplittedPath)-1]] = &GraphQLUpload{
 			MIMEType: mimeType,
-			Filename: handle.Filename,
-			Filepath: f.Name(),
+			FileName: handle.Filename,
+			FilePath: f.Name(),
 		}
 		return op, nil
 	}
