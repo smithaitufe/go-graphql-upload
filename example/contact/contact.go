@@ -33,7 +33,7 @@ var schemastring = `
 		photo: Upload!
 	}
 
-	type Profile {
+	type Contact {
 		firstName: String!
 		lastName: String!
 	}
@@ -44,7 +44,7 @@ func StartAndListenGraphQL(port int) {
 
 	h := handler{Schema: schema}
 	http.Handle("/graphiql", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		http.ServeFile(w, r, "graphiql.html")
+		http.ServeFile(w, r, "../graphiql.html")
 	}))
 	http.Handle("/graphql", cors.Default().Handler(graphqlupload.Handler(h)))
 	if err := http.ListenAndServe(fmt.Sprintf(":%d", port), nil); err != nil {
@@ -87,34 +87,34 @@ type contactInput struct {
 	LastName  string
 	Photo     graphqlupload.GraphQLUpload
 }
-type person struct {
+type contact struct {
 	FirstName string
 	LastName  string
 }
 type contactResolver struct {
-	p person
+	c contact
 }
 
 func (r *contactResolver) FirstName() string {
-	return r.p.FirstName
+	return r.c.FirstName
 }
 func (r *contactResolver) LastName() string {
-	return r.p.LastName
+	return r.c.LastName
 }
-func (r *schemaResolver) contacts(ctx context.Context) ([]*contactResolver, error) {
-	persons := []person{
-		person{FirstName: "Smith", LastName: "Samuel"},
-		person{FirstName: "Friday", LastName: "Gabs"},
-		person{FirstName: "Miriam", LastName: "Jude"},
-		person{FirstName: "Stephen", LastName: "Stoke"},
-		person{FirstName: "Rachael", LastName: "Magdalene"},
-		person{FirstName: "Joseph", LastName: "Brown"},
-		person{FirstName: "Sonia", LastName: "Fish"},
-		person{FirstName: "Cynthia", LastName: "Gray"},
-		person{FirstName: "Saint", LastName: "Rose"},
+func (r *schemaResolver) Contacts(ctx context.Context) ([]*contactResolver, error) {
+	contacts := []contact{
+		contact{FirstName: "Smith", LastName: "Samuel"},
+		contact{FirstName: "Friday", LastName: "Gabs"},
+		contact{FirstName: "Miriam", LastName: "Jude"},
+		contact{FirstName: "Stephen", LastName: "Stoke"},
+		contact{FirstName: "Rachael", LastName: "Magdalene"},
+		contact{FirstName: "Joseph", LastName: "Brown"},
+		contact{FirstName: "Sonia", LastName: "Fish"},
+		contact{FirstName: "Cynthia", LastName: "Gray"},
+		contact{FirstName: "Saint", LastName: "Rose"},
 	}
-	resolvers := make([]*contactResolver, len(persons))
-	for k, v := range persons {
+	resolvers := make([]*contactResolver, len(contacts))
+	for k, v := range contacts {
 		resolvers[k] = &contactResolver{v}
 	}
 	return resolvers, nil
@@ -128,9 +128,9 @@ func (r *schemaResolver) CreateContact(ctx context.Context, args struct {
 	if err != nil {
 		panic(err)
 	}
-	ioutil.WriteFile(args.Input.Photo.Filename, b2[:], 0666)
+	ioutil.WriteFile(args.Input.Photo.FileName, b2[:], 0666)
 
 	// method 2: using WriteFile function. Easily write to any location in the local file system
-	args.Input.Photo.WriteFile(args.Input.Photo.Filename)
-	return &contactResolver{person{FirstName: "Smithies", LastName: "Frank"}}, nil
+	args.Input.Photo.WriteFile(args.Input.Photo.FileName)
+	return &contactResolver{contact{FirstName: "Smithies", LastName: "Frank"}}, nil
 }
