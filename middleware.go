@@ -170,11 +170,16 @@ func batchTransformation(mapEntries map[string][]string, batchOperations []map[s
 }
 func findField(operations interface{}, entryPaths []string) map[string]interface{} {
 	for i := 0; i < len(entryPaths); i++ {
-		if arr, ok := operations.([]map[string]interface{}); ok {
-			operations = arr[i]
-			return findField(operations, entryPaths)
+		if arr, ok := operations.([]interface{}); ok {
+			index, err := strconv.Atoi(entryPaths[i])
+			if err != nil {
+				panic("non-integer index provided for array value")
+			}
+			operations = arr[index]
 		} else if op, ok := operations.(map[string]interface{}); ok {
 			operations = op[entryPaths[i]]
+		} else {
+			panic("invalid operation mapping")
 		}
 	}
 	return operations.(map[string]interface{})
